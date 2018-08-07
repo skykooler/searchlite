@@ -5,41 +5,50 @@
 
 import pprint
 import uuid
+import tempfile
+import os
+import json
 
 MAX_BUCKET_SIZE = 20
-IDS = {}
 
 
 class DB(object):
     """Mini elasticsearch-like database."""
 
-    def __init__(self):
-        """Create new empty db object."""
+    def __init__(self, filename=None):
+        """Create new db object.
+
+        If filename is passed, load db from disk.
+        Otherwise, create an empty db.
+        """
+        self.ids = {}
         self.prefixes = {}
+        if filename is not None:
+            self.load(filename)
 
     def add(self, item):
         """Item is an arbitrary dictionary to be added to the database.
 
         Keys are indexed
         """
-        itemid = uuid.uuid4()
-        IDS[itemid] = item
+        itemid = str(uuid.uuid4())
+        self.ids[itemid] = item
         for key in item.keys():
             prefixes = self.prefixes
             for i, char in enumerate(key):
                 if char in prefixes:
                     if i == len(key) - 1:
-                        if item[key] in prefixes[char][0]:
-                            prefixes[char][0][item[key]].append(itemid)
+                        if str(item[key]) in prefixes[char][0]:
+                            prefixes[char][0][str(item[key])].append(itemid)
                         else:
-                            prefixes[char][0][item[key]] = [itemid]
+                            prefixes[char][0][str(item[key])] = [itemid]
                     else:
                         prefixes = prefixes[char][1]
                     # if len(prefixes[char]) > MAX_BUCKET_SIZE:
 
                 else:
                     if i == len(key) - 1:
-                        prefixes[char] = [{item[key]:[itemid]}]
+                        prefixes[char] = [{str(item[key]):[itemid]}]
                     else:
                         prefixes[char] = [{}, {}]
                         prefixes = prefixes[char][1]
@@ -52,9 +61,26 @@ class DB(object):
         prefixes = self.prefixes
         for char in field[:-1]:
             prefixes = prefixes[char][1]
-        return [IDS[i] for i in prefixes[field[-1]][0][val]]
+        return [self.ids[i] for i in prefixes[field[-1]][0][str(val)]]
 
     def pprint(self):
         """Pretty print internals of object."""
-        pprint.pprint(IDS)
+        pprint.pprint(self.ids)
         pprint.pprint(self.prefixes)
+
+    def save(self, filename):
+        """Save data to a file atomically."""
+        with tempfile.NamedTemporaryFile(
+            'w',
+            dir=os.path.dirname(filename),
+            delete=False
+        ) as tmpfile:
+            json.dump(
+                [self.ids, self.prefixes],
+                tmpfile,
+                separators=(',', ':'))
+            os.rename(tmpfile.name, filename)
+
+    def load(self, filename):
+        """Load data from a file. Overwrites current database contents."""
+        self.ids, self.prefixes = json.load(open(filename))
